@@ -1,0 +1,22 @@
+// swift-tools-version: 6.2
+
+import PackageDescription
+
+let package = Package(
+    name: "AeroSpacePlugin",
+    platforms: [.macOS(.v26)],
+    products: [
+        .library(name: "AeroSpacePlugin", type: .dynamic, targets: ["AeroSpacePlugin"]),
+    ],
+    dependencies: [
+        .package(path: "../macos-status-bar/StatusBarKit"),
+    ],
+    targets: [
+        .target(
+            name: "AeroSpacePlugin",
+            dependencies: [
+                .product(name: "StatusBarKit", package: "StatusBarKit"),
+            ]
+        ),
+    ]
+)
