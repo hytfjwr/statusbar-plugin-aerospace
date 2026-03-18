@@ -2,6 +2,9 @@
 
 [AeroSpace](https://github.com/nikitabobko/AeroSpace) tiling window manager workspace widget for [StatusBar](https://github.com/hytfjwr/StatusBar).
 
+<img width="588" height="112" alt="image" src="https://github.com/user-attachments/assets/dba55bab-c536-4acd-a08d-25e8ca9b8fe9" />
+
+
 ## Features
 
 - Workspace indicators with focused workspace highlight
