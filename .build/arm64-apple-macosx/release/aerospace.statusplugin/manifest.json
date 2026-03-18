@@ -1,8 +1,0 @@
-{
-  "id": "com.statusbar.aerospace",
-  "name": "AeroSpacePlugin",
-  "version": "0.1.0",
-  "statusBarKitVersion": "1.0.0",
-  "swiftVersion": "6.2",
-  "entrySymbol": "createStatusBarPlugin"
-}

@@ -1,3 +1,0 @@
-module StatusBarKit {
-    header "/Users/hayato.fujiwara/Dev/poc/statusbar-plugin-aerospace/.build/arm64-apple-macosx/debug/StatusBarKit.build/include/StatusBarKit-Swift.h"
-}
