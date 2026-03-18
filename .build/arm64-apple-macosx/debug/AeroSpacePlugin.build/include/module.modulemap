@@ -1,0 +1,3 @@
+module AeroSpacePlugin {
+    header "/Users/hayato.fujiwara/Dev/poc/statusbar-plugin-aerospace/.build/arm64-apple-macosx/debug/AeroSpacePlugin.build/include/AeroSpacePlugin-Swift.h"
+}
