@@ -21,6 +21,30 @@ In StatusBar preferences → Plugins → Add Plugin:
 hytfjwr/statusbar-plugin-aerospace
 ```
 
+## Setup
+
+Add the following to your `~/.aerospace.toml` to enable real-time workspace change detection:
+
+```toml
+exec-on-workspace-change = [
+  '/bin/bash', '-c',
+  'echo "$AEROSPACE_FOCUSED_WORKSPACE" > "$TMPDIR/statusbar_focused_workspace"'
+]
+```
+
+Without this setting, the plugin falls back to polling-based updates only.
+
+## Configuration
+
+The following options are available in the widget settings:
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| Update interval | Polling interval for workspace list | 10s |
+| Show app icons | Display app icons in each workspace | On |
+| Icon size | App icon size (12–20px) | 16px |
+| Show empty workspaces | Display workspaces with no windows | Off |
+
 ## Development
 
 ```bash
