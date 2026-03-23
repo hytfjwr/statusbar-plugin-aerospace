@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import StatusBarKit
 import SwiftUI
 
@@ -10,10 +9,11 @@ import SwiftUI
 public final class WorkspaceWidget: StatusBarWidget {
     public let id = "workspace"
     public let position: WidgetPosition = .left
-    public let updateInterval: TimeInterval? = 10
+    public var updateInterval: TimeInterval? { Self.fallbackInterval }
     public var sfSymbolName: String { "square.grid.3x3" }
 
-    private var timer: AnyCancellable?
+    private var fallbackTimer: DispatchSourceTimer?
+    private var debounceWork: DispatchWorkItem?
     private let service = AeroSpaceService()
     private var workspaces: [WorkspaceInfo] = []
     private var focusedWorkspace = ""
@@ -23,8 +23,9 @@ public final class WorkspaceWidget: StatusBarWidget {
     private var showAppIcons = true
     private var appIconSize = 16.0
     private var showEmptySpaces = false
+    private var workspaceObservers: [NSObjectProtocol] = []
 
-    public struct WorkspaceInfo: Identifiable {
+    public struct WorkspaceInfo: Identifiable, Equatable {
         public let id: String
         public let apps: [String]
         public let isFocused: Bool
@@ -36,14 +37,17 @@ public final class WorkspaceWidget: StatusBarWidget {
     public func start() {
         applySettings()
         update()
-        restartTimer()
+        startFallbackTimer()
         startFileMonitoring()
+        startWorkspaceNotifications()
         observeSettings()
     }
 
     public func stop() {
-        timer?.cancel()
+        fallbackTimer?.cancel()
+        debounceWork?.cancel()
         stopFileMonitoring()
+        stopWorkspaceNotifications()
     }
 
     public var hasSettings: Bool { true }
@@ -59,25 +63,61 @@ public final class WorkspaceWidget: StatusBarWidget {
         showEmptySpaces = settings.showEmptySpaces
     }
 
-    private func restartTimer() {
-        timer?.cancel()
-        let interval = WorkspaceSettings.shared.updateInterval
-        timer = Timer.publish(every: interval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in self?.update() }
+    private static let fallbackInterval: TimeInterval = 60
+    private static let debounceInterval: TimeInterval = 0.3
+
+    private func startFallbackTimer() {
+        fallbackTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + Self.fallbackInterval, repeating: Self.fallbackInterval)
+        timer.setEventHandler { [weak self] in self?.scheduleUpdate() }
+        timer.resume()
+        fallbackTimer = timer
+    }
+
+    /// Debounced update — coalesces rapid events into a single CLI fetch.
+    private func scheduleUpdate() {
+        debounceWork?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.update() }
+        debounceWork = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.debounceInterval, execute: item)
+    }
+
+    // MARK: - NSWorkspace Notifications
+
+    private func startWorkspaceNotifications() {
+        let center = NSWorkspace.shared.notificationCenter
+        let names: [NSNotification.Name] = [
+            NSWorkspace.didLaunchApplicationNotification,
+            NSWorkspace.didTerminateApplicationNotification,
+        ]
+        for name in names {
+            let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.scheduleUpdate()
+                }
+            }
+            workspaceObservers.append(observer)
+        }
+    }
+
+    private func stopWorkspaceNotifications() {
+        let center = NSWorkspace.shared.notificationCenter
+        for observer in workspaceObservers {
+            center.removeObserver(observer)
+        }
+        workspaceObservers.removeAll()
     }
 
     private func observeSettings() {
         withObservationTracking {
             let s = WorkspaceSettings.shared
-            _ = s.updateInterval
             _ = s.showAppIcons
             _ = s.appIconSize
             _ = s.showEmptySpaces
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.applySettings()
-                self?.restartTimer()
                 self?.update()
                 self?.observeSettings()
             }
@@ -131,7 +171,7 @@ public final class WorkspaceWidget: StatusBarWidget {
             await MainActor.run { [weak self] in
                 guard let self, newFocused != focusedWorkspace else { return }
                 focusedWorkspace = newFocused
-                update()
+                scheduleUpdate()
             }
         }
     }
@@ -141,8 +181,7 @@ public final class WorkspaceWidget: StatusBarWidget {
         updateTask = Task { @MainActor in
             let info = await service.fetchWorkspaces()
             guard !Task.isCancelled else { return }
-            self.focusedWorkspace = info.focused
-            self.workspaces = info.workspaces.compactMap { ws in
+            let newWorkspaces: [WorkspaceInfo] = info.workspaces.compactMap { ws in
                 if !self.showEmptySpaces, ws.apps.isEmpty, ws.id != info.focused {
                     return nil
                 }
@@ -152,6 +191,12 @@ public final class WorkspaceWidget: StatusBarWidget {
                     isFocused: ws.id == info.focused,
                     monitorID: ws.monitorID
                 )
+            }
+            if info.focused != self.focusedWorkspace {
+                self.focusedWorkspace = info.focused
+            }
+            if newWorkspaces != self.workspaces {
+                self.workspaces = newWorkspaces
             }
         }
     }
@@ -231,14 +276,12 @@ private struct WorkspaceItemView: View {
 // MARK: - WorkspaceWidgetSettings
 
 struct WorkspaceWidgetSettings: View {
-    @State private var updateInterval: Double
     @State private var showAppIcons: Bool
     @State private var appIconSize: Double
     @State private var showEmptySpaces: Bool
 
     init() {
         let s = WorkspaceSettings.shared
-        _updateInterval = State(initialValue: s.updateInterval)
         _showAppIcons = State(initialValue: s.showAppIcons)
         _appIconSize = State(initialValue: s.appIconSize)
         _showEmptySpaces = State(initialValue: s.showEmptySpaces)
@@ -246,25 +289,6 @@ struct WorkspaceWidgetSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Update Interval
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Update Interval")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-
-                Picker("Update Interval", selection: $updateInterval) {
-                    Text("5 seconds").tag(5.0)
-                    Text("10 seconds").tag(10.0)
-                    Text("30 seconds").tag(30.0)
-                }
-                .pickerStyle(.radioGroup)
-                .onChange(of: updateInterval) { _, newValue in
-                    WorkspaceSettings.shared.updateInterval = newValue
-                }
-            }
-
-            Divider()
-
             // Display
             VStack(alignment: .leading, spacing: 8) {
                 Text("Display")
