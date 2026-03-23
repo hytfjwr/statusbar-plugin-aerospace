@@ -23,6 +23,7 @@ public final class WorkspaceWidget: StatusBarWidget {
     private var showAppIcons = true
     private var appIconSize = 16.0
     private var showEmptySpaces = false
+    private var activeBackgroundColor = WorkspaceSettings.defaultActiveBackgroundColor
     private var workspaceObservers: [NSObjectProtocol] = []
 
     public struct WorkspaceInfo: Identifiable, Equatable {
@@ -61,6 +62,7 @@ public final class WorkspaceWidget: StatusBarWidget {
         showAppIcons = settings.showAppIcons
         appIconSize = settings.appIconSize
         showEmptySpaces = settings.showEmptySpaces
+        activeBackgroundColor = settings.activeBackgroundColor
     }
 
     private static let fallbackInterval: TimeInterval = 60
@@ -115,6 +117,7 @@ public final class WorkspaceWidget: StatusBarWidget {
             _ = s.showAppIcons
             _ = s.appIconSize
             _ = s.showEmptySpaces
+            _ = s.activeBackgroundColor
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.applySettings()
@@ -205,7 +208,8 @@ public final class WorkspaceWidget: StatusBarWidget {
         WorkspaceContainerView(
             workspaces: workspaces,
             showAppIcons: showAppIcons,
-            appIconSize: appIconSize
+            appIconSize: appIconSize,
+            activeBackgroundColor: activeBackgroundColor
         )
     }
 }
@@ -216,12 +220,17 @@ private struct WorkspaceContainerView: View {
     let workspaces: [WorkspaceWidget.WorkspaceInfo]
     let showAppIcons: Bool
     let appIconSize: CGFloat
+    let activeBackgroundColor: String
     @Environment(\.screenIndex) private var screenIndex
 
-    init(workspaces: [WorkspaceWidget.WorkspaceInfo], showAppIcons: Bool, appIconSize: Double) {
+    init(
+        workspaces: [WorkspaceWidget.WorkspaceInfo], showAppIcons: Bool, appIconSize: Double,
+        activeBackgroundColor: String
+    ) {
         self.workspaces = workspaces
         self.showAppIcons = showAppIcons
         self.appIconSize = CGFloat(appIconSize)
+        self.activeBackgroundColor = activeBackgroundColor
     }
 
     var body: some View {
@@ -232,7 +241,10 @@ private struct WorkspaceContainerView: View {
         }
         HStack(spacing: 4) {
             ForEach(filtered) { ws in
-                WorkspaceItemView(workspace: ws, showAppIcons: showAppIcons, appIconSize: appIconSize) {
+                WorkspaceItemView(
+                    workspace: ws, showAppIcons: showAppIcons, appIconSize: appIconSize,
+                    activeBackgroundColor: activeBackgroundColor
+                ) {
                     Task {
                         try? await ShellCommand.run("aerospace", arguments: ["workspace", ws.id])
                     }
@@ -248,6 +260,7 @@ private struct WorkspaceItemView: View {
     let workspace: WorkspaceWidget.WorkspaceInfo
     let showAppIcons: Bool
     let appIconSize: CGFloat
+    let activeBackgroundColor: String
     let onTap: () -> Void
 
     var body: some View {
@@ -264,6 +277,12 @@ private struct WorkspaceItemView: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
         .foregroundStyle(workspace.isFocused ? .primary : .secondary)
+        .background(
+            workspace.isFocused
+                ? RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(hex: activeBackgroundColor).opacity(0.35))
+                : nil
+        )
         .glassEffect(
             workspace.isFocused ? .regular.interactive() : .regular,
             in: .rect(cornerRadius: 5)
@@ -279,12 +298,14 @@ struct WorkspaceWidgetSettings: View {
     @State private var showAppIcons: Bool
     @State private var appIconSize: Double
     @State private var showEmptySpaces: Bool
+    @State private var activeBackgroundColor: Color
 
     init() {
         let s = WorkspaceSettings.shared
         _showAppIcons = State(initialValue: s.showAppIcons)
         _appIconSize = State(initialValue: s.appIconSize)
         _showEmptySpaces = State(initialValue: s.showEmptySpaces)
+        _activeBackgroundColor = State(initialValue: Color(hex: s.activeBackgroundColor))
     }
 
     var body: some View {
@@ -324,6 +345,43 @@ struct WorkspaceWidgetSettings: View {
                         WorkspaceSettings.shared.showEmptySpaces = newValue
                     }
             }
+
+            // Appearance
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Appearance")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                ColorPicker("Active Background", selection: $activeBackgroundColor, supportsOpacity: false)
+                    .onChange(of: activeBackgroundColor) { _, newValue in
+                        WorkspaceSettings.shared.activeBackgroundColor = newValue.hexString
+                    }
+            }
         }
+    }
+}
+
+// MARK: - Color Hex Helpers
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var rgb: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&rgb)
+        self.init(
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255
+        )
+    }
+
+    var hexString: String {
+        guard let components = NSColor(self).usingColorSpace(.sRGB) else {
+            return WorkspaceSettings.defaultActiveBackgroundColor
+        }
+        let r = Int(round(components.redComponent * 255))
+        let g = Int(round(components.greenComponent * 255))
+        let b = Int(round(components.blueComponent * 255))
+        return String(format: "#%02X%02X%02X", r, g, b)
     }
 }
