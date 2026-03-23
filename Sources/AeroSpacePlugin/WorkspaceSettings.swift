@@ -21,11 +21,18 @@ final class WorkspaceSettings: WidgetConfigProvider {
         didSet { if !suppressWrite { WidgetConfigRegistry.shared.notifySettingsChanged() } }
     }
 
+    nonisolated static let defaultActiveBackgroundColor = "#007AFF"
+
+    var activeBackgroundColor: String {
+        didSet { if !suppressWrite { WidgetConfigRegistry.shared.notifySettingsChanged() } }
+    }
+
     private init() {
         let cfg = WidgetConfigRegistry.shared.values(for: "workspace")
         showAppIcons = cfg?["showAppIcons"]?.boolValue ?? true
         appIconSize = cfg?["appIconSize"]?.doubleValue ?? 16.0
         showEmptySpaces = cfg?["showEmptySpaces"]?.boolValue ?? false
+        activeBackgroundColor = cfg?["activeBackgroundColor"]?.stringValue ?? Self.defaultActiveBackgroundColor
         WidgetConfigRegistry.shared.register(self)
     }
 
@@ -34,6 +41,7 @@ final class WorkspaceSettings: WidgetConfigProvider {
             "showAppIcons": .bool(showAppIcons),
             "appIconSize": .double(appIconSize),
             "showEmptySpaces": .bool(showEmptySpaces),
+            "activeBackgroundColor": .string(activeBackgroundColor),
         ]
     }
 
@@ -43,5 +51,6 @@ final class WorkspaceSettings: WidgetConfigProvider {
         if let v = values["showAppIcons"]?.boolValue { showAppIcons = v }
         if let v = values["appIconSize"]?.doubleValue { appIconSize = v }
         if let v = values["showEmptySpaces"]?.boolValue { showEmptySpaces = v }
+        if let v = values["activeBackgroundColor"]?.stringValue { activeBackgroundColor = v }
     }
 }
