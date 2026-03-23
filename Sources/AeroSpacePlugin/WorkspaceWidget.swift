@@ -67,6 +67,9 @@ public final class WorkspaceWidget: StatusBarWidget {
 
     private static let fallbackInterval: TimeInterval = 60
     private static let debounceInterval: TimeInterval = 0.3
+    /// Delay for a follow-up update after app launch/terminate, giving AeroSpace
+    /// time to register the new window before we re-query.
+    private static let launchSettleDelay: TimeInterval = 2.0
 
     private func startFallbackTimer() {
         fallbackTimer?.cancel()
@@ -85,15 +88,42 @@ public final class WorkspaceWidget: StatusBarWidget {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.debounceInterval, execute: item)
     }
 
+    /// Delayed follow-up update for app launch/terminate events.
+    /// AeroSpace may not have registered the window immediately, so we
+    /// re-query after a short settle period.
+    private func scheduleDelayedUpdate() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.launchSettleDelay) { [weak self] in
+            self?.scheduleUpdate()
+        }
+    }
+
     // MARK: - NSWorkspace Notifications
 
     private func startWorkspaceNotifications() {
         let center = NSWorkspace.shared.notificationCenter
-        let names: [NSNotification.Name] = [
+        // App lifecycle events — schedule an immediate update plus a delayed
+        // follow-up because AeroSpace may not have registered the window yet.
+        let lifecycleNames: [NSNotification.Name] = [
             NSWorkspace.didLaunchApplicationNotification,
             NSWorkspace.didTerminateApplicationNotification,
         ]
-        for name in names {
+        for name in lifecycleNames {
+            let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.scheduleUpdate()
+                    self?.scheduleDelayedUpdate()
+                }
+            }
+            workspaceObservers.append(observer)
+        }
+
+        // Activation / space-change events — catch app switches and macOS
+        // space transitions that don't involve a launch or terminate.
+        let activationNames: [NSNotification.Name] = [
+            NSWorkspace.didActivateApplicationNotification,
+            NSWorkspace.activeSpaceDidChangeNotification,
+        ]
+        for name in activationNames {
             let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
                     self?.scheduleUpdate()
