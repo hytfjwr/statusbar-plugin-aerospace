@@ -28,7 +28,7 @@ Add the following to your `~/.aerospace.toml` to enable real-time workspace chan
 ```toml
 exec-on-workspace-change = [
   '/bin/bash', '-c',
-  'echo "$AEROSPACE_FOCUSED_WORKSPACE" > "$TMPDIR/statusbar_focused_workspace"'
+  'sbar trigger --event "com.statusbar.aerospace.workspace_changed" --payload "$AEROSPACE_FOCUSED_WORKSPACE"'
 ]
 ```
 

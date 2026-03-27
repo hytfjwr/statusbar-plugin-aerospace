@@ -9,7 +9,7 @@ let package = Package(
         .library(name: "AeroSpacePlugin", type: .dynamic, targets: ["AeroSpacePlugin"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/hytfjwr/StatusBarKit", from: "1.0.0"),
+        .package(url: "https://github.com/hytfjwr/StatusBarKit", from: "1.6.0"),
     ],
     targets: [
         .target(

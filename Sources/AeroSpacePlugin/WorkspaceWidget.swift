@@ -11,6 +11,7 @@ public final class WorkspaceWidget: StatusBarWidget {
     public let position: WidgetPosition = .left
     public var updateInterval: TimeInterval? { Self.fallbackInterval }
     public var sfSymbolName: String { "square.grid.3x3" }
+    public var subscribedEvents: [String] { ["workspace_changed"] }
 
     private var fallbackTimer: DispatchSourceTimer?
     private var debounceWork: DispatchWorkItem?
@@ -18,8 +19,6 @@ public final class WorkspaceWidget: StatusBarWidget {
     private let service = AeroSpaceService()
     private var workspaces: [WorkspaceInfo] = []
     private var focusedWorkspace = ""
-    private var fileMonitorSource: DispatchSourceFileSystemObject?
-    private var fileDescriptor: Int32 = -1
     private var updateTask: Task<Void, Never>?
     private var showAppIcons = true
     private var appIconSize = 16.0
@@ -40,7 +39,6 @@ public final class WorkspaceWidget: StatusBarWidget {
         applySettings()
         update()
         startFallbackTimer()
-        startFileMonitoring()
         startWorkspaceNotifications()
         observeSettings()
     }
@@ -49,14 +47,21 @@ public final class WorkspaceWidget: StatusBarWidget {
         fallbackTimer?.cancel()
         debounceWork?.cancel()
         delayedUpdateWork?.cancel()
-        stopFileMonitoring()
+        updateTask?.cancel()
         stopWorkspaceNotifications()
     }
 
-    public var hasSettings: Bool { true }
-
     public func settingsBody() -> some View {
         WorkspaceWidgetSettings()
+    }
+
+    public func handleEvent(_ event: PluginEvent) {
+        if case .string(let workspace) = event.payload,
+           workspace != focusedWorkspace
+        {
+            focusedWorkspace = workspace
+        }
+        scheduleUpdate()
     }
 
     private func applySettings() {
@@ -153,58 +158,6 @@ public final class WorkspaceWidget: StatusBarWidget {
                 self?.applySettings()
                 self?.update()
                 self?.observeSettings()
-            }
-        }
-    }
-
-    private func startFileMonitoring() {
-        let path = AeroSpaceService.focusedWorkspaceFile
-
-        if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: nil)
-        }
-
-        fileDescriptor = open(path, O_EVTONLY)
-        guard fileDescriptor >= 0 else {
-            return
-        }
-
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fileDescriptor,
-            eventMask: [.write, .rename],
-            queue: .main
-        )
-
-        source.setEventHandler { [weak self] in
-            self?.onFileChanged()
-        }
-
-        let capturedFD = fileDescriptor
-        source.setCancelHandler {
-            if capturedFD >= 0 {
-                close(capturedFD)
-            }
-        }
-
-        source.resume()
-        fileMonitorSource = source
-    }
-
-    private func stopFileMonitoring() {
-        fileMonitorSource?.cancel()
-        fileMonitorSource = nil
-    }
-
-    private func onFileChanged() {
-        let path = AeroSpaceService.focusedWorkspaceFile
-        Task.detached {
-            guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return }
-            let newFocused = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !newFocused.isEmpty else { return }
-            await MainActor.run { [weak self] in
-                guard let self, newFocused != focusedWorkspace else { return }
-                focusedWorkspace = newFocused
-                scheduleUpdate()
             }
         }
     }
