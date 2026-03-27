@@ -11,16 +11,20 @@ final class AeroSpaceService: @unchecked Sendable {
         let monitorID: Int?
     }
 
-    struct Result {
-        let focused: String
-        let workspaces: [WorkspaceData]
+    func fetchFocusedWorkspace() async -> String {
+        do {
+            return try await ShellCommand
+                .run("aerospace", arguments: ["list-workspaces", "--focused"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            logger.debug("fetchFocusedWorkspace failed: \(error.localizedDescription)")
+            return ""
+        }
     }
 
-    func fetchWorkspaces() async -> Result {
+    func fetchWorkspaces() async -> [WorkspaceData] {
         do {
-            // 2 CLI calls: focused workspace + all windows with monitor IDs
-            async let focusedTask = ShellCommand.run("aerospace", arguments: ["list-workspaces", "--focused"])
-            async let windowsTask = ShellCommand
+            let windowsJSON = try await ShellCommand
                 .run(
                     "aerospace",
                     arguments: [
@@ -29,11 +33,9 @@ final class AeroSpaceService: @unchecked Sendable {
                     ]
                 )
 
-            let focused = try await focusedTask.trimmingCharacters(in: .whitespacesAndNewlines)
-            let windowsJSON = try await windowsTask
-
             // Parse windows JSON to derive workspace list, app mappings, and monitor IDs
             var appsByWorkspace: [String: [String]] = [:]
+            var seenApps: [String: Set<String>] = [:]
             var monitorByWorkspace: [String: Int] = [:]
             if let data = windowsJSON.data(using: .utf8),
                let windows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
@@ -41,7 +43,7 @@ final class AeroSpaceService: @unchecked Sendable {
                 for window in windows {
                     guard let ws = window["workspace"] as? String else { continue }
                     if let app = window["app-name"] as? String,
-                       !appsByWorkspace[ws, default: []].contains(app)
+                       seenApps[ws, default: []].insert(app).inserted
                     {
                         appsByWorkspace[ws, default: []].append(app)
                     }
@@ -51,14 +53,8 @@ final class AeroSpaceService: @unchecked Sendable {
                 }
             }
 
-            // Ensure focused workspace is always included
-            var allWorkspaceIDs = Set(appsByWorkspace.keys)
-            if !focused.isEmpty {
-                allWorkspaceIDs.insert(focused)
-            }
-
             // Sort: numeric first (1-9), then alpha (A-Z)
-            let sorted = allWorkspaceIDs.sorted { a, b in
+            let sorted = appsByWorkspace.keys.sorted { a, b in
                 let aNum = Int(a)
                 let bNum = Int(b)
                 if let an = aNum, let bn = bNum {
@@ -73,14 +69,12 @@ final class AeroSpaceService: @unchecked Sendable {
                 return a < b
             }
 
-            let workspaces = sorted.map { ws in
+            return sorted.map { ws in
                 WorkspaceData(id: ws, apps: appsByWorkspace[ws] ?? [], monitorID: monitorByWorkspace[ws])
             }
-
-            return Result(focused: focused, workspaces: workspaces)
         } catch {
             logger.debug("fetchWorkspaces failed: \(error.localizedDescription)")
-            return Result(focused: "", workspaces: [])
+            return []
         }
     }
 }
