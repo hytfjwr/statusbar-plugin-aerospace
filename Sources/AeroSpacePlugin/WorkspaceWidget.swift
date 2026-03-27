@@ -56,8 +56,7 @@ public final class WorkspaceWidget: StatusBarWidget {
     }
 
     public func handleEvent(_ event: PluginEvent) {
-        if case .object(let obj) = event.payload,
-           case .string(let workspace) = obj["workspace"],
+        if case .string(let workspace) = event.payload,
            workspace != focusedWorkspace
         {
             focusedWorkspace = workspace
