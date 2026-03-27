@@ -37,7 +37,12 @@ public final class WorkspaceWidget: StatusBarWidget {
 
     public func start() {
         applySettings()
-        update()
+        Task { @MainActor in
+            async let focused = service.fetchFocusedWorkspace()
+            async let data = service.fetchWorkspaces()
+            focusedWorkspace = await focused
+            applyWorkspaceData(await data)
+        }
         startFallbackTimer()
         startWorkspaceNotifications()
         observeSettings()
@@ -56,12 +61,23 @@ public final class WorkspaceWidget: StatusBarWidget {
     }
 
     public func handleEvent(_ event: PluginEvent) {
-        if case .string(let workspace) = event.payload,
-           workspace != focusedWorkspace
-        {
-            focusedWorkspace = workspace
+        // Payload can be .string("A") or .number(2.0) depending on workspace name
+        let workspace: String
+        switch event.payload {
+        case .string(let s): workspace = s
+        case .number(let n): workspace = n.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(n)) : String(n)
+        default: return
         }
-        scheduleUpdate()
+        guard workspace != focusedWorkspace else { return }
+        focusedWorkspace = workspace
+        if workspaces.contains(where: { $0.id == workspace }) {
+            workspaces = workspaces.map { ws in
+                WorkspaceInfo(id: ws.id, apps: ws.apps, isFocused: ws.id == workspace, monitorID: ws.monitorID)
+            }
+        } else {
+            scheduleUpdate()
+        }
     }
 
     private func applySettings() {
@@ -108,15 +124,14 @@ public final class WorkspaceWidget: StatusBarWidget {
     private func startWorkspaceNotifications() {
         let center = NSWorkspace.shared.notificationCenter
 
-        // App lifecycle — immediate update + delayed follow-up because
-        // AeroSpace may not have registered the window yet.
+        // App lifecycle — delayed update only, giving AeroSpace time to
+        // register/unregister the window before we query.
         for name in [
             NSWorkspace.didLaunchApplicationNotification,
             NSWorkspace.didTerminateApplicationNotification,
         ] {
             let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
-                    self?.scheduleUpdate()
                     self?.scheduleDelayedUpdate()
                 }
             }
@@ -165,25 +180,32 @@ public final class WorkspaceWidget: StatusBarWidget {
     private func update() {
         updateTask?.cancel()
         updateTask = Task { @MainActor in
-            let info = await service.fetchWorkspaces()
+            let data = await service.fetchWorkspaces()
             guard !Task.isCancelled else { return }
-            let newWorkspaces: [WorkspaceInfo] = info.workspaces.compactMap { ws in
-                if !self.showEmptySpaces, ws.apps.isEmpty, ws.id != info.focused {
-                    return nil
-                }
-                return WorkspaceInfo(
-                    id: ws.id,
-                    apps: ws.apps,
-                    isFocused: ws.id == info.focused,
-                    monitorID: ws.monitorID
-                )
+            applyWorkspaceData(data)
+        }
+    }
+
+    private func applyWorkspaceData(_ data: [AeroSpaceService.WorkspaceData]) {
+        let focused = focusedWorkspace
+        var allData = data
+        // Ensure focused workspace is always included
+        if !focused.isEmpty, !allData.contains(where: { $0.id == focused }) {
+            allData.append(AeroSpaceService.WorkspaceData(id: focused, apps: [], monitorID: nil))
+        }
+        let newWorkspaces: [WorkspaceInfo] = allData.compactMap { ws in
+            if !showEmptySpaces, ws.apps.isEmpty, ws.id != focused {
+                return nil
             }
-            if info.focused != self.focusedWorkspace {
-                self.focusedWorkspace = info.focused
-            }
-            if newWorkspaces != self.workspaces {
-                self.workspaces = newWorkspaces
-            }
+            return WorkspaceInfo(
+                id: ws.id,
+                apps: ws.apps,
+                isFocused: ws.id == focused,
+                monitorID: ws.monitorID
+            )
+        }
+        if newWorkspaces != workspaces {
+            workspaces = newWorkspaces
         }
     }
 
