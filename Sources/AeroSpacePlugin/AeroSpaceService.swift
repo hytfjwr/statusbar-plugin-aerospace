@@ -16,14 +16,6 @@ final class AeroSpaceService: @unchecked Sendable {
         let workspaces: [WorkspaceData]
     }
 
-    /// File path used for event-driven workspace change detection.
-    /// Configure AeroSpace with: exec-on-workspace-change = ['/bin/bash', '-c',
-    /// 'echo "$AEROSPACE_FOCUSED_WORKSPACE" > "$TMPDIR/statusbar_focused_workspace"']
-    static let focusedWorkspaceFile: String = {
-        let tmpDir = FileManager.default.temporaryDirectory.path
-        return "\(tmpDir)/statusbar_focused_workspace"
-    }()
-
     func fetchWorkspaces() async -> Result {
         do {
             // 2 CLI calls: focused workspace + all windows with monitor IDs
